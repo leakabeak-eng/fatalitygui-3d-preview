@@ -10472,6 +10472,158 @@ function Fatality.new(Window: Window)
 		Camera.Parent = Viewport
 		Viewport.CurrentCamera = Camera
 
+		-- Player ESP preview: a live 3D copy of the local character with a 2D ESP overlay.
+		local ESPPreviewBlock = EditorMenu:AddPreview({
+			Name = "ESP PREVIEW",
+			Position = "center",
+			Height = 270
+		})
+
+		local ESPViewport = Instance.new("ViewportFrame")
+		ESPViewport.Name = "ESPViewport"
+		ESPViewport.Parent = ESPPreviewBlock
+		ESPViewport.BackgroundColor3 = Color3.fromRGB(8, 8, 8)
+		ESPViewport.BorderSizePixel = 0
+		ESPViewport.Size = UDim2.new(1, 0, 1, 0)
+		ESPViewport.Ambient = Color3.fromRGB(180, 180, 180)
+		ESPViewport.LightColor = Color3.fromRGB(255, 255, 255)
+		ESPViewport.LightDirection = Vector3.new(-1, -1, -1)
+
+		local ESPWorld = Instance.new("WorldModel")
+		ESPWorld.Parent = ESPViewport
+
+		local ESPCamera = Instance.new("Camera")
+		ESPCamera.Parent = ESPViewport
+		ESPViewport.CurrentCamera = ESPCamera
+
+		local ESPOverlay = Instance.new("Frame")
+		ESPOverlay.Name = "ESPOverlay"
+		ESPOverlay.Parent = ESPViewport
+		ESPOverlay.BackgroundTransparency = 1
+		ESPOverlay.BorderSizePixel = 0
+		ESPOverlay.Size = UDim2.new(1, 0, 1, 0)
+		ESPOverlay.ZIndex = 20
+
+		local ESPBox = Instance.new("Frame")
+		ESPBox.Name = "Box"
+		ESPBox.Parent = ESPOverlay
+		ESPBox.BackgroundTransparency = 1
+		ESPBox.BorderSizePixel = 1
+		ESPBox.BorderColor3 = Color3.fromRGB(255, 255, 255)
+		ESPBox.Visible = false
+		ESPBox.ZIndex = 21
+
+		local ESPName = Instance.new("TextLabel")
+		ESPName.Name = "Name"
+		ESPName.Parent = ESPOverlay
+		ESPName.BackgroundTransparency = 1
+		ESPName.TextColor3 = Color3.fromRGB(255, 255, 255)
+		ESPName.TextStrokeTransparency = 0.2
+		ESPName.Font = Enum.Font.GothamBold
+		ESPName.TextSize = 12
+		ESPName.Size = UDim2.fromOffset(180, 18)
+		ESPName.AnchorPoint = Vector2.new(0.5, 1)
+		ESPName.Visible = false
+		ESPName.ZIndex = 22
+
+		local ESPHealthBack = Instance.new("Frame")
+		ESPHealthBack.Name = "HealthBack"
+		ESPHealthBack.Parent = ESPOverlay
+		ESPHealthBack.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+		ESPHealthBack.BorderSizePixel = 0
+		ESPHealthBack.Visible = false
+		ESPHealthBack.ZIndex = 21
+
+		local ESPHealthFill = Instance.new("Frame")
+		ESPHealthFill.Name = "Fill"
+		ESPHealthFill.Parent = ESPHealthBack
+		ESPHealthFill.BackgroundColor3 = Color3.fromRGB(120, 255, 120)
+		ESPHealthFill.BorderSizePixel = 0
+		ESPHealthFill.Size = UDim2.new(1, 0, 1, 0)
+		ESPHealthFill.ZIndex = 22
+
+		local ESPOptions = { Box = true, Name = true, Health = true }
+		local ESPCharacter
+		local ESPHumanoid
+
+		local function getESPCharacter()
+			local player = game:GetService("Players").LocalPlayer
+			local character = player and player.Character
+			if not character then return nil end
+			return character
+		end
+
+		local function rebuildESPCharacter()
+			if ESPCharacter then
+				ESPCharacter:Destroy()
+				ESPCharacter = nil
+				ESPHumanoid = nil
+			end
+
+			local source = getESPCharacter()
+			if not source then
+				ESPBox.Visible = false
+				ESPName.Visible = false
+				ESPHealthBack.Visible = false
+				return
+			end
+
+			local oldArchivable = source.Archivable
+			source.Archivable = true
+			local ok, clone = pcall(function() return source:Clone() end)
+			source.Archivable = oldArchivable
+			if not ok or not clone then return end
+
+			ESPCharacter = clone
+			ESPCharacter.Name = "ESP_PreviewCharacter"
+			ESPCharacter.Parent = ESPWorld
+			ESPHumanoid = ESPCharacter:FindFirstChildOfClass("Humanoid")
+
+			for _, obj in ipairs(ESPCharacter:GetDescendants()) do
+				if obj:IsA("Script") or obj:IsA("LocalScript") then
+					obj:Destroy()
+				elseif obj:IsA("BasePart") then
+					obj.Anchored = true
+					obj.CanCollide = false
+					obj.CanTouch = false
+					obj.CanQuery = false
+				end
+			end
+
+			ESPCharacter:PivotTo(CFrame.new(0, 0, 0))
+			ESPCamera.CFrame = CFrame.lookAt(Vector3.new(0, 2.4, 8), Vector3.new(0, 2.4, 0))
+		end
+
+		local function getCharacterBounds(model)
+			local minX, minY = math.huge, math.huge
+			local maxX, maxY = -math.huge, -math.huge
+			local found = false
+
+			for _, obj in ipairs(model:GetDescendants()) do
+				if obj:IsA("BasePart") then
+					local half = obj.Size * 0.5
+					for x = -1, 1, 2 do
+						for y = -1, 1, 2 do
+							for z = -1, 1, 2 do
+								local worldPoint = obj.CFrame:PointToWorldSpace(Vector3.new(half.X * x, half.Y * y, half.Z * z))
+								local point, visible = ESPCamera:WorldToViewportPoint(worldPoint)
+								if visible and point.Z > 0 then
+									found = true
+									minX = math.min(minX, point.X)
+									minY = math.min(minY, point.Y)
+									maxX = math.max(maxX, point.X)
+									maxY = math.max(maxY, point.Y)
+								end
+							end
+						end
+					end
+				end
+			end
+
+			if not found then return nil end
+			return minX, minY, maxX, maxY
+		end
+
 		local Ground = Instance.new("Part")
 		Ground.Name = "EditorGround"
 		Ground.Anchored = true
@@ -10546,6 +10698,101 @@ function Fatality.new(Window: Window)
 				updateCamera()
 			end
 		end)
+
+		local ESPConnection = game:GetService("RunService").RenderStepped:Connect(function()
+			if not ESPCharacter or not ESPCharacter.Parent then
+				rebuildESPCharacter()
+			end
+
+			local source = getESPCharacter()
+			if source and ESPCharacter then
+				-- Copy the real character pose, so walk/jump/fall/idle animations appear in the preview.
+				local sourceRoot = source:FindFirstChild("HumanoidRootPart")
+				local previewRoot = ESPCharacter:FindFirstChild("HumanoidRootPart")
+				if sourceRoot and previewRoot then
+					local yaw = math.rad(sourceRoot.Orientation.Y)
+					previewRoot.CFrame = CFrame.new(0, 0, 0) * CFrame.Angles(0, yaw, 0)
+				end
+
+				-- Copy every part's relative CFrame. This mirrors idle/walk/run/jump/fall poses
+				-- without needing to run any animation scripts inside the viewport clone.
+				if sourceRoot and previewRoot then
+					local sourceRootCF = sourceRoot.CFrame
+					local previewRootCF = previewRoot.CFrame
+					for _, sourcePart in ipairs(source:GetDescendants()) do
+						if sourcePart:IsA("BasePart") then
+							local previewPart = ESPCharacter:FindFirstChild(sourcePart.Name, true)
+							if previewPart and previewPart:IsA("BasePart") then
+								local relative = sourceRootCF:ToObjectSpace(sourcePart.CFrame)
+								previewPart.CFrame = previewRootCF * relative
+							end
+						end
+					end
+				end
+			end
+
+			if ESPCharacter then
+				local minX, minY, maxX, maxY = getCharacterBounds(ESPCharacter)
+				if minX then
+					local width = math.max(2, maxX - minX)
+					local height = math.max(2, maxY - minY)
+					ESPBox.Position = UDim2.fromOffset(minX, minY)
+					ESPBox.Size = UDim2.fromOffset(width, height)
+					ESPBox.Visible = ESPOptions.Box
+
+					ESPName.Position = UDim2.fromOffset((minX + maxX) * 0.5, minY - 2)
+					ESPName.Text = game:GetService("Players").LocalPlayer.Name
+					ESPName.Visible = ESPOptions.Name
+
+					ESPHealthBack.Position = UDim2.fromOffset(minX - 7, minY)
+					ESPHealthBack.Size = UDim2.fromOffset(4, height)
+					local hp = ESPHumanoid and ESPHumanoid.MaxHealth > 0 and math.clamp(ESPHumanoid.Health / ESPHumanoid.MaxHealth, 0, 1) or 1
+					ESPHealthFill.Size = UDim2.new(1, 0, hp, 0)
+					ESPHealthFill.Position = UDim2.new(0, 0, 1 - hp, 0)
+					ESPHealthBack.Visible = ESPOptions.Health
+				else
+					ESPBox.Visible = false
+					ESPName.Visible = false
+					ESPHealthBack.Visible = false
+				end
+			end
+		end)
+
+		local ESPSection = EditorMenu:AddSection({
+			Name = "ESP PREVIEW",
+			Position = "left",
+			Height = 0
+		})
+
+		ESPSection:AddToggle({
+			Name = "Box",
+			Default = true,
+			Callback = function(v) ESPOptions.Box = v end
+		})
+
+		ESPSection:AddToggle({
+			Name = "Name",
+			Default = true,
+			Callback = function(v) ESPOptions.Name = v end
+		})
+
+		ESPSection:AddToggle({
+			Name = "Health",
+			Default = true,
+			Callback = function(v) ESPOptions.Health = v end
+		})
+
+		ESPSection:AddButton({
+			Name = "Refresh Player",
+			Callback = function() rebuildESPCharacter() end
+		})
+
+		game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
+			task.wait(0.25)
+			rebuildESPCharacter()
+		end)
+
+		rebuildESPCharacter()
 
 		-- Right: material/color/export controls
 		local ToolsSection = EditorMenu:AddSection({
