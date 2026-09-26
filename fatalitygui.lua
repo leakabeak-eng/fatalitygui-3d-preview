@@ -10566,40 +10566,89 @@ function Fatality.new(Window: Window)
 				ESPBox.Visible = false
 				ESPName.Visible = false
 				ESPHealthBack.Visible = false
-				return
+				return false
 			end
 
+			-- Clone the actual character. We explicitly enable Archivable and
+			-- remove scripts so the clone is safe to render in a ViewportFrame.
 			local oldArchivable = source.Archivable
 			source.Archivable = true
-			local ok, clone = pcall(function() return source:Clone() end)
+			local ok, clone = pcall(function()
+				return source:Clone()
+			end)
 			source.Archivable = oldArchivable
-			if not ok or not clone then return end
+
+			if not ok or not clone then
+				-- Fallback: clone visible body/accessory parts individually.
+				clone = Instance.new("Model")
+				clone.Name = "ESP_PreviewCharacter"
+				for _, src in ipairs(source:GetDescendants()) do
+					if src:IsA("BasePart") and src.Name ~= "HumanoidRootPart" then
+						local partOK, part = pcall(function() return src:Clone() end)
+						if partOK and part then
+							part.Parent = clone
+						end
+					end
+				end
+				if #clone:GetChildren() == 0 then
+					warn("[Fatality 3D ESP] Character clone failed")
+					clone:Destroy()
+					return false
+				end
+			end
 
 			ESPCharacter = clone
 			ESPCharacter.Name = "ESP_PreviewCharacter"
 			ESPCharacter.Parent = ESPWorld
 			ESPHumanoid = ESPCharacter:FindFirstChildOfClass("Humanoid")
 
+			-- Put the clone in a clean, known state. In particular, force
+			-- LocalTransparencyModifier/Transparency to visible values because
+			-- the local player's character can have transparency applied to it.
 			for _, obj in ipairs(ESPCharacter:GetDescendants()) do
-				if obj:IsA("Script") or obj:IsA("LocalScript") then
+				if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
 					obj:Destroy()
 				elseif obj:IsA("BasePart") then
 					obj.Anchored = true
 					obj.CanCollide = false
 					obj.CanTouch = false
 					obj.CanQuery = false
+					obj.CastShadow = true
+					obj.LocalTransparencyModifier = 0
+					if obj.Name ~= "HumanoidRootPart" then
+						obj.Transparency = 0
+					end
+				elseif obj:IsA("Decal") or obj:IsA("Texture") then
+					obj.Transparency = 0
 				end
 			end
 
-			ESPCharacter:PivotTo(CFrame.new(0, 0, 0))
+			-- Normalize the model around the origin. The viewport camera is
+			-- deliberately positioned from the resulting bounding box below.
+			local pivot = ESPCharacter:GetPivot()
+			ESPCharacter:PivotTo(CFrame.new(0, 0, 0) * pivot.Rotation)
 
-			-- Keep the model centered and fully inside the ViewportFrame.
 			local boxCF, boxSize = ESPCharacter:GetBoundingBox()
 			local focus = boxCF.Position
-			local radius = math.max(boxSize.X, boxSize.Y, boxSize.Z) * 0.6
-			local distance = math.max(7, radius / math.tan(math.rad(ESPCamera.FieldOfView * 0.5)) * 1.35)
+			local height = math.max(boxSize.Y, 3)
+			local width = math.max(boxSize.X, 2)
+			local depth = math.max(boxSize.Z, 2)
+			local halfExtent = math.max(height, width, depth) * 0.55
+
 			ESPCamera.FieldOfView = 35
-			ESPCamera.CFrame = CFrame.lookAt(focus + Vector3.new(0, 0.15, distance), focus + Vector3.new(0, 0.15, 0))
+			local distance = math.max(8, halfExtent / math.tan(math.rad(ESPCamera.FieldOfView * 0.5)) + 2)
+			local cameraFocus = Vector3.new(focus.X, focus.Y + height * 0.05, focus.Z)
+			ESPCamera.CFrame = CFrame.lookAt(
+				cameraFocus + Vector3.new(0, 0, distance),
+				cameraFocus
+			)
+
+			-- Force a small light source through the ViewportFrame settings.
+			ESPViewport.Ambient = Color3.fromRGB(200, 200, 200)
+			ESPViewport.LightColor = Color3.fromRGB(255, 255, 255)
+			ESPViewport.LightDirection = Vector3.new(-1, -1, -1)
+
+			return true
 		end
 
 		local function getCharacterBounds(model)
