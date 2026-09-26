@@ -10495,14 +10495,15 @@ function Fatality.new(Window: Window)
 		local ESPCamera = Instance.new("Camera")
 		ESPCamera.Parent = ESPViewport
 		ESPViewport.CurrentCamera = ESPCamera
+		ESPViewport.ZIndex = 1
 
 		local ESPOverlay = Instance.new("Frame")
 		ESPOverlay.Name = "ESPOverlay"
-		ESPOverlay.Parent = ESPViewport
+		ESPOverlay.Parent = ESPPreviewBlock
 		ESPOverlay.BackgroundTransparency = 1
 		ESPOverlay.BorderSizePixel = 0
 		ESPOverlay.Size = UDim2.new(1, 0, 1, 0)
-		ESPOverlay.ZIndex = 20
+		ESPOverlay.ZIndex = 50
 
 		local ESPBox = Instance.new("Frame")
 		ESPBox.Name = "Box"
@@ -10511,7 +10512,7 @@ function Fatality.new(Window: Window)
 		ESPBox.BorderSizePixel = 1
 		ESPBox.BorderColor3 = Color3.fromRGB(255, 255, 255)
 		ESPBox.Visible = false
-		ESPBox.ZIndex = 21
+		ESPBox.ZIndex = 51
 
 		local ESPName = Instance.new("TextLabel")
 		ESPName.Name = "Name"
@@ -10524,7 +10525,7 @@ function Fatality.new(Window: Window)
 		ESPName.Size = UDim2.fromOffset(180, 18)
 		ESPName.AnchorPoint = Vector2.new(0.5, 1)
 		ESPName.Visible = false
-		ESPName.ZIndex = 22
+		ESPName.ZIndex = 52
 
 		local ESPHealthBack = Instance.new("Frame")
 		ESPHealthBack.Name = "HealthBack"
@@ -10532,7 +10533,7 @@ function Fatality.new(Window: Window)
 		ESPHealthBack.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 		ESPHealthBack.BorderSizePixel = 0
 		ESPHealthBack.Visible = false
-		ESPHealthBack.ZIndex = 21
+		ESPHealthBack.ZIndex = 51
 
 		local ESPHealthFill = Instance.new("Frame")
 		ESPHealthFill.Name = "Fill"
@@ -10540,7 +10541,7 @@ function Fatality.new(Window: Window)
 		ESPHealthFill.BackgroundColor3 = Color3.fromRGB(120, 255, 120)
 		ESPHealthFill.BorderSizePixel = 0
 		ESPHealthFill.Size = UDim2.new(1, 0, 1, 0)
-		ESPHealthFill.ZIndex = 22
+		ESPHealthFill.ZIndex = 52
 
 		local ESPOptions = { Box = true, Name = true, Health = true }
 		local ESPCharacter
@@ -10591,7 +10592,14 @@ function Fatality.new(Window: Window)
 			end
 
 			ESPCharacter:PivotTo(CFrame.new(0, 0, 0))
-			ESPCamera.CFrame = CFrame.lookAt(Vector3.new(0, 2.4, 8), Vector3.new(0, 2.4, 0))
+
+			-- Keep the model centered and fully inside the ViewportFrame.
+			local boxCF, boxSize = ESPCharacter:GetBoundingBox()
+			local focus = boxCF.Position
+			local radius = math.max(boxSize.X, boxSize.Y, boxSize.Z) * 0.6
+			local distance = math.max(7, radius / math.tan(math.rad(ESPCamera.FieldOfView * 0.5)) * 1.35)
+			ESPCamera.FieldOfView = 35
+			ESPCamera.CFrame = CFrame.lookAt(focus + Vector3.new(0, 0.15, distance), focus + Vector3.new(0, 0.15, 0))
 		end
 
 		local function getCharacterBounds(model)
