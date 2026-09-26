@@ -10214,6 +10214,809 @@ function Fatality.new(Window: Window)
 		ToggleUI(b);
 	end;
 
+
+	--// Built-in 3D Model Editor
+	--// Creates editable Parts in a local editor folder and previews them in a ViewportFrame.
+	function Fatal:Add3DModelEditor()
+		if Fatal.__3DEditor then
+			return Fatal.__3DEditor
+		end
+
+		local EditorMenu = Fatal:AddMenu({
+			Name = "3D Editor",
+			Icon = "move-3d",
+			AutoFill = false
+		})
+
+		local Objects = {}
+		local Selected = nil
+		local NextId = 0
+		local syncEditor
+		local CameraAngle = Vector2.new(-25, 35)
+		local CameraDistance = 18
+
+		local EditorFolder = Instance.new("Folder")
+		EditorFolder.Name = "Fatality3D_Editor"
+		EditorFolder.Parent = workspace
+
+		-- Left: creation / transformation controls
+		local CreateSection = EditorMenu:AddSection({
+			Name = "CREATE",
+			Position = "left",
+			Height = 0
+		})
+
+		local function makePart(className, displayName, size)
+			NextId += 1
+
+			local part = Instance.new(className)
+			part.Name = displayName .. "_" .. tostring(NextId)
+			part.Size = size
+			part.Position = Vector3.new(0, size.Y / 2, 0)
+			part.Anchored = true
+			part.Material = Enum.Material.SmoothPlastic
+			part.Color = Color3.fromRGB(170, 170, 170)
+			part.Parent = EditorFolder
+
+			local data = {
+				Part = part,
+				Id = NextId,
+				Name = part.Name
+			}
+
+			table.insert(Objects, data)
+			Selected = data
+			return data
+		end
+
+		CreateSection:AddButton({
+			Name = "Add Block",
+			Callback = function()
+				makePart("Part", "Block", Vector3.new(4, 2, 4))
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		CreateSection:AddButton({
+			Name = "Add Ball",
+			Callback = function()
+				local d = makePart("Part", "Ball", Vector3.new(3, 3, 3))
+				d.Part.Shape = Enum.PartType.Ball
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		CreateSection:AddButton({
+			Name = "Add Cylinder",
+			Callback = function()
+				local d = makePart("Part", "Cylinder", Vector3.new(3, 3, 3))
+				d.Part.Shape = Enum.PartType.Cylinder
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		CreateSection:AddButton({
+			Name = "Add Wedge",
+			Callback = function()
+				makePart("WedgePart", "Wedge", Vector3.new(4, 2, 4))
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		CreateSection:AddButton({
+			Name = "Duplicate",
+			Callback = function()
+				if not Selected or not Selected.Part or not Selected.Part.Parent then return end
+
+				local old = Selected.Part
+				NextId += 1
+
+				local clone = old:Clone()
+				clone.Name = old.Name .. "_copy" .. tostring(NextId)
+				clone.CFrame = old.CFrame * CFrame.new(2, 0, 2)
+				clone.Parent = EditorFolder
+
+				local data = {
+					Part = clone,
+					Id = NextId,
+					Name = clone.Name
+				}
+
+				table.insert(Objects, data)
+				Selected = data
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		CreateSection:AddButton({
+			Name = "Delete Selected",
+			Risky = false,
+			Callback = function()
+				if not Selected then return end
+
+				if Selected.Part then
+					Selected.Part:Destroy()
+				end
+
+				for i = #Objects, 1, -1 do
+					if Objects[i] == Selected then
+						table.remove(Objects, i)
+						break
+					end
+				end
+
+				Selected = Objects[#Objects]
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		local TransformSection = EditorMenu:AddSection({
+			Name = "TRANSFORM",
+			Position = "left",
+			Height = 0
+		})
+
+		local function setPosition(axis, value)
+			if not Selected or not Selected.Part or not Selected.Part.Parent then return end
+			local p = Selected.Part.Position
+			local v = tonumber(value) or 0
+
+			if axis == "X" then
+				Selected.Part.Position = Vector3.new(v, p.Y, p.Z)
+			elseif axis == "Y" then
+				Selected.Part.Position = Vector3.new(p.X, v, p.Z)
+			else
+				Selected.Part.Position = Vector3.new(p.X, p.Y, v)
+			end
+		end
+
+		TransformSection:AddSlider({
+			Name = "Position X",
+			Min = -50,
+			Max = 50,
+			Default = 0,
+			Round = 1,
+			Type = "float",
+			Callback = function(v)
+				setPosition("X", v)
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		TransformSection:AddSlider({
+			Name = "Position Y",
+			Min = -50,
+			Max = 50,
+			Default = 0,
+			Round = 1,
+			Type = "float",
+			Callback = function(v)
+				setPosition("Y", v)
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		TransformSection:AddSlider({
+			Name = "Position Z",
+			Min = -50,
+			Max = 50,
+			Default = 0,
+			Round = 1,
+			Type = "float",
+			Callback = function(v)
+				setPosition("Z", v)
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		TransformSection:AddSlider({
+			Name = "Size",
+			Min = 0.25,
+			Max = 20,
+			Default = 4,
+			Round = 2,
+			Type = "float",
+			Callback = function(v)
+				if Selected and Selected.Part and Selected.Part.Parent then
+					local old = Selected.Part.Size
+					local maxAxis = math.max(old.X, old.Y, old.Z)
+					if maxAxis > 0 then
+						Selected.Part.Size = old * (v / maxAxis)
+					end
+				end
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		TransformSection:AddSlider({
+			Name = "Rotation Y",
+			Min = -180,
+			Max = 180,
+			Default = 0,
+			Round = 1,
+			Type = "float",
+			Callback = function(v)
+				if Selected and Selected.Part and Selected.Part.Parent then
+					local p = Selected.Part.Position
+					Selected.Part.CFrame = CFrame.new(p) * CFrame.Angles(
+						math.rad(Selected.Part.Orientation.X),
+						math.rad(v),
+						math.rad(Selected.Part.Orientation.Z)
+					)
+				end
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		-- Center: live 3D viewport
+		local PreviewBlock = EditorMenu:AddPreview({
+			Name = "3D VIEWPORT",
+			Position = "center",
+			Height = 330
+		})
+
+		local Viewport = Instance.new("ViewportFrame")
+		Viewport.Name = "ModelViewport"
+		Viewport.Parent = PreviewBlock
+		Viewport.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+		Viewport.BorderSizePixel = 0
+		Viewport.Size = UDim2.new(1, 0, 1, 0)
+		Viewport.Ambient = Color3.fromRGB(190, 190, 190)
+		Viewport.LightColor = Color3.fromRGB(255, 255, 255)
+		Viewport.LightDirection = Vector3.new(-1, -1, -1)
+
+		local WorldModel = Instance.new("WorldModel")
+		WorldModel.Parent = Viewport
+
+		local Camera = Instance.new("Camera")
+		Camera.Parent = Viewport
+		Viewport.CurrentCamera = Camera
+
+		-- Player ESP preview: a live 3D copy of the local character with a 2D ESP overlay.
+		local ESPPreviewBlock = EditorMenu:AddPreview({
+			Name = "ESP PREVIEW",
+			Position = "center",
+			Height = 270
+		})
+
+		local ESPViewport = Instance.new("ViewportFrame")
+		ESPViewport.Name = "ESPViewport"
+		ESPViewport.Parent = ESPPreviewBlock
+		ESPViewport.BackgroundColor3 = Color3.fromRGB(8, 8, 8)
+		ESPViewport.BorderSizePixel = 0
+		ESPViewport.Size = UDim2.new(1, 0, 1, 0)
+		ESPViewport.Ambient = Color3.fromRGB(180, 180, 180)
+		ESPViewport.LightColor = Color3.fromRGB(255, 255, 255)
+		ESPViewport.LightDirection = Vector3.new(-1, -1, -1)
+
+		local ESPWorld = Instance.new("WorldModel")
+		ESPWorld.Parent = ESPViewport
+
+		local ESPCamera = Instance.new("Camera")
+		ESPCamera.Parent = ESPViewport
+		ESPViewport.CurrentCamera = ESPCamera
+
+		local ESPOverlay = Instance.new("Frame")
+		ESPOverlay.Name = "ESPOverlay"
+		ESPOverlay.Parent = ESPViewport
+		ESPOverlay.BackgroundTransparency = 1
+		ESPOverlay.BorderSizePixel = 0
+		ESPOverlay.Size = UDim2.new(1, 0, 1, 0)
+		ESPOverlay.ZIndex = 20
+
+		local ESPBox = Instance.new("Frame")
+		ESPBox.Name = "Box"
+		ESPBox.Parent = ESPOverlay
+		ESPBox.BackgroundTransparency = 1
+		ESPBox.BorderSizePixel = 1
+		ESPBox.BorderColor3 = Color3.fromRGB(255, 255, 255)
+		ESPBox.Visible = false
+		ESPBox.ZIndex = 21
+
+		local ESPName = Instance.new("TextLabel")
+		ESPName.Name = "Name"
+		ESPName.Parent = ESPOverlay
+		ESPName.BackgroundTransparency = 1
+		ESPName.TextColor3 = Color3.fromRGB(255, 255, 255)
+		ESPName.TextStrokeTransparency = 0.2
+		ESPName.Font = Enum.Font.GothamBold
+		ESPName.TextSize = 12
+		ESPName.Size = UDim2.fromOffset(180, 18)
+		ESPName.AnchorPoint = Vector2.new(0.5, 1)
+		ESPName.Visible = false
+		ESPName.ZIndex = 22
+
+		local ESPHealthBack = Instance.new("Frame")
+		ESPHealthBack.Name = "HealthBack"
+		ESPHealthBack.Parent = ESPOverlay
+		ESPHealthBack.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+		ESPHealthBack.BorderSizePixel = 0
+		ESPHealthBack.Visible = false
+		ESPHealthBack.ZIndex = 21
+
+		local ESPHealthFill = Instance.new("Frame")
+		ESPHealthFill.Name = "Fill"
+		ESPHealthFill.Parent = ESPHealthBack
+		ESPHealthFill.BackgroundColor3 = Color3.fromRGB(120, 255, 120)
+		ESPHealthFill.BorderSizePixel = 0
+		ESPHealthFill.Size = UDim2.new(1, 0, 1, 0)
+		ESPHealthFill.ZIndex = 22
+
+		local ESPOptions = { Box = true, Name = true, Health = true }
+		local ESPCharacter
+		local ESPHumanoid
+
+		local function getESPCharacter()
+			local player = game:GetService("Players").LocalPlayer
+			local character = player and player.Character
+			if not character then return nil end
+			return character
+		end
+
+		local function rebuildESPCharacter()
+			if ESPCharacter then
+				ESPCharacter:Destroy()
+				ESPCharacter = nil
+				ESPHumanoid = nil
+			end
+
+			local source = getESPCharacter()
+			if not source then
+				ESPBox.Visible = false
+				ESPName.Visible = false
+				ESPHealthBack.Visible = false
+				return
+			end
+
+			local oldArchivable = source.Archivable
+			source.Archivable = true
+			local ok, clone = pcall(function() return source:Clone() end)
+			source.Archivable = oldArchivable
+			if not ok or not clone then return end
+
+			ESPCharacter = clone
+			ESPCharacter.Name = "ESP_PreviewCharacter"
+			ESPCharacter.Parent = ESPWorld
+			ESPHumanoid = ESPCharacter:FindFirstChildOfClass("Humanoid")
+
+			for _, obj in ipairs(ESPCharacter:GetDescendants()) do
+				if obj:IsA("Script") or obj:IsA("LocalScript") then
+					obj:Destroy()
+				elseif obj:IsA("BasePart") then
+					obj.Anchored = true
+					obj.CanCollide = false
+					obj.CanTouch = false
+					obj.CanQuery = false
+				end
+			end
+
+			ESPCharacter:PivotTo(CFrame.new(0, 0, 0))
+			ESPCamera.CFrame = CFrame.lookAt(Vector3.new(0, 2.4, 8), Vector3.new(0, 2.4, 0))
+		end
+
+		local function getCharacterBounds(model)
+			local minX, minY = math.huge, math.huge
+			local maxX, maxY = -math.huge, -math.huge
+			local found = false
+
+			for _, obj in ipairs(model:GetDescendants()) do
+				if obj:IsA("BasePart") then
+					local half = obj.Size * 0.5
+					for x = -1, 1, 2 do
+						for y = -1, 1, 2 do
+							for z = -1, 1, 2 do
+								local worldPoint = obj.CFrame:PointToWorldSpace(Vector3.new(half.X * x, half.Y * y, half.Z * z))
+								local point, visible = ESPCamera:WorldToViewportPoint(worldPoint)
+								if visible and point.Z > 0 then
+									found = true
+									minX = math.min(minX, point.X)
+									minY = math.min(minY, point.Y)
+									maxX = math.max(maxX, point.X)
+									maxY = math.max(maxY, point.Y)
+								end
+							end
+						end
+					end
+				end
+			end
+
+			if not found then return nil end
+			return minX, minY, maxX, maxY
+		end
+
+		local Ground = Instance.new("Part")
+		Ground.Name = "EditorGround"
+		Ground.Anchored = true
+		Ground.Size = Vector3.new(100, 0.2, 100)
+		Ground.Position = Vector3.new(0, -0.1, 0)
+		Ground.Color = Color3.fromRGB(30, 30, 30)
+		Ground.Material = Enum.Material.SmoothPlastic
+		Ground.Parent = WorldModel
+
+		local function refreshViewport()
+			for _, child in ipairs(WorldModel:GetChildren()) do
+				if child ~= Ground then
+					child:Destroy()
+				end
+			end
+
+			for _, data in ipairs(Objects) do
+				if data.Part and data.Part.Parent then
+					local clone = data.Part:Clone()
+					clone.Archivable = true
+					clone.Parent = WorldModel
+
+					if data == Selected then
+						clone.Color = Fatality.Colors.Main
+					end
+				end
+			end
+		end
+
+		local function updateCamera()
+			local yaw = math.rad(CameraAngle.X)
+			local pitch = math.rad(CameraAngle.Y)
+			local target = Vector3.new(0, 2, 0)
+
+			local offset = Vector3.new(
+				math.cos(pitch) * math.sin(yaw),
+				math.sin(pitch),
+				math.cos(pitch) * math.cos(yaw)
+			) * CameraDistance
+
+			Camera.CFrame = CFrame.lookAt(target + offset, target)
+		end
+
+		updateCamera()
+
+		-- Rotate the viewport with mouse drag.
+		local dragging = false
+		local lastMouse
+
+		Viewport.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				dragging = true
+				lastMouse = input.Position
+			end
+		end)
+
+		Viewport.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				dragging = false
+			end
+		end)
+
+		UserInputService.InputChanged:Connect(function(input)
+			if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+				local delta = input.Position - lastMouse
+				lastMouse = input.Position
+				CameraAngle = CameraAngle + Vector2.new(delta.X * 0.35, -delta.Y * 0.35)
+				CameraAngle = Vector2.new(CameraAngle.X, math.clamp(CameraAngle.Y, -80, 80))
+				updateCamera()
+			elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+				CameraDistance = math.clamp(CameraDistance - input.Position.Z * 1.5, 5, 80)
+				updateCamera()
+			end
+		end)
+
+		local ESPConnection = game:GetService("RunService").RenderStepped:Connect(function()
+			if not ESPCharacter or not ESPCharacter.Parent then
+				rebuildESPCharacter()
+			end
+
+			local source = getESPCharacter()
+			if source and ESPCharacter then
+				-- Copy the real character pose, so walk/jump/fall/idle animations appear in the preview.
+				local sourceRoot = source:FindFirstChild("HumanoidRootPart")
+				local previewRoot = ESPCharacter:FindFirstChild("HumanoidRootPart")
+				if sourceRoot and previewRoot then
+					local yaw = math.rad(sourceRoot.Orientation.Y)
+					previewRoot.CFrame = CFrame.new(0, 0, 0) * CFrame.Angles(0, yaw, 0)
+				end
+
+				-- Copy every part's relative CFrame. This mirrors idle/walk/run/jump/fall poses
+				-- without needing to run any animation scripts inside the viewport clone.
+				if sourceRoot and previewRoot then
+					local sourceRootCF = sourceRoot.CFrame
+					local previewRootCF = previewRoot.CFrame
+					for _, sourcePart in ipairs(source:GetDescendants()) do
+						if sourcePart:IsA("BasePart") then
+							local previewPart = ESPCharacter:FindFirstChild(sourcePart.Name, true)
+							if previewPart and previewPart:IsA("BasePart") then
+								local relative = sourceRootCF:ToObjectSpace(sourcePart.CFrame)
+								previewPart.CFrame = previewRootCF * relative
+							end
+						end
+					end
+				end
+			end
+
+			if ESPCharacter then
+				local minX, minY, maxX, maxY = getCharacterBounds(ESPCharacter)
+				if minX then
+					local width = math.max(2, maxX - minX)
+					local height = math.max(2, maxY - minY)
+					ESPBox.Position = UDim2.fromOffset(minX, minY)
+					ESPBox.Size = UDim2.fromOffset(width, height)
+					ESPBox.Visible = ESPOptions.Box
+
+					ESPName.Position = UDim2.fromOffset((minX + maxX) * 0.5, minY - 2)
+					ESPName.Text = game:GetService("Players").LocalPlayer.Name
+					ESPName.Visible = ESPOptions.Name
+
+					ESPHealthBack.Position = UDim2.fromOffset(minX - 7, minY)
+					ESPHealthBack.Size = UDim2.fromOffset(4, height)
+					local hp = ESPHumanoid and ESPHumanoid.MaxHealth > 0 and math.clamp(ESPHumanoid.Health / ESPHumanoid.MaxHealth, 0, 1) or 1
+					ESPHealthFill.Size = UDim2.new(1, 0, hp, 0)
+					ESPHealthFill.Position = UDim2.new(0, 0, 1 - hp, 0)
+					ESPHealthBack.Visible = ESPOptions.Health
+				else
+					ESPBox.Visible = false
+					ESPName.Visible = false
+					ESPHealthBack.Visible = false
+				end
+			end
+		end)
+
+		local ESPSection = EditorMenu:AddSection({
+			Name = "ESP PREVIEW",
+			Position = "left",
+			Height = 0
+		})
+
+		ESPSection:AddToggle({
+			Name = "Box",
+			Default = true,
+			Callback = function(v) ESPOptions.Box = v end
+		})
+
+		ESPSection:AddToggle({
+			Name = "Name",
+			Default = true,
+			Callback = function(v) ESPOptions.Name = v end
+		})
+
+		ESPSection:AddToggle({
+			Name = "Health",
+			Default = true,
+			Callback = function(v) ESPOptions.Health = v end
+		})
+
+		ESPSection:AddButton({
+			Name = "Refresh Player",
+			Callback = function() rebuildESPCharacter() end
+		})
+
+		game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
+			task.wait(0.25)
+			rebuildESPCharacter()
+		end)
+
+		rebuildESPCharacter()
+
+		-- Right: material/color/export controls
+		local ToolsSection = EditorMenu:AddSection({
+			Name = "MODEL",
+			Position = "right",
+			Height = 0
+		})
+
+		ToolsSection:AddDropdown({
+			Name = "Material",
+			Default = "SmoothPlastic",
+			Values = {
+				"SmoothPlastic",
+				"Plastic",
+				"Metal",
+				"Glass",
+				"Neon",
+				"Wood",
+				"Concrete",
+				"Brick"
+			},
+			Callback = function(value)
+				if Selected and Selected.Part and Selected.Part.Parent then
+					local ok, material = pcall(function()
+						return Enum.Material[value]
+					end)
+					if ok and material then
+						Selected.Part.Material = material
+						if syncEditor then syncEditor() end
+					end
+				end
+			end
+		})
+
+		ToolsSection:AddColorPicker({
+			Name = "Color",
+			Default = Color3.fromRGB(170, 170, 170),
+			Transparency = 0,
+			Callback = function(value)
+				if not Selected or not Selected.Part or not Selected.Part.Parent then return end
+
+				if typeof(value) == "Color3" then
+					Selected.Part.Color = value
+				elseif typeof(value) == "table" and value.Color then
+					Selected.Part.Color = value.Color
+					Selected.Part.Transparency = value.Transparency or 0
+				end
+				if syncEditor then syncEditor() end
+			end
+		})
+
+		local ListSection = EditorMenu:AddSection({
+			Name = "OBJECTS",
+			Position = "right",
+			Height = 0
+		})
+
+		local ObjectPreview = EditorMenu:AddPreview({
+			Name = "SCENE",
+			Position = "right",
+			Height = 210
+		})
+
+		local ObjectList = Instance.new("ScrollingFrame")
+		ObjectList.Name = "ObjectList"
+		ObjectList.Parent = ObjectPreview
+		ObjectList.BackgroundTransparency = 1
+		ObjectList.BorderSizePixel = 0
+		ObjectList.Size = UDim2.new(1, 0, 1, 0)
+		ObjectList.ScrollBarThickness = 3
+		ObjectList.CanvasSize = UDim2.new(0, 0, 0, 0)
+
+		local ObjectLayout = Instance.new("UIListLayout")
+		ObjectLayout.Parent = ObjectList
+		ObjectLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		ObjectLayout.Padding = UDim.new(0, 3)
+
+		local function rebuildObjectList()
+			for _, child in ipairs(ObjectList:GetChildren()) do
+				if child:IsA("TextButton") then
+					child:Destroy()
+				end
+			end
+
+			for _, data in ipairs(Objects) do
+				if data.Part and data.Part.Parent then
+					local button = Instance.new("TextButton")
+					button.Name = "Object"
+					button.Parent = ObjectList
+					button.Size = UDim2.new(1, -6, 0, 27)
+					button.BackgroundColor3 = (data == Selected and Fatality.Colors.Main) or Fatality.Colors.Black
+					button.BackgroundTransparency = (data == Selected and 0.15) or 0
+					button.BorderSizePixel = 0
+					button.Font = Enum.Font.GothamMedium
+					button.Text = "  " .. data.Part.Name
+					button.TextColor3 = Color3.fromRGB(235, 235, 235)
+					button.TextSize = 12
+					button.TextXAlignment = Enum.TextXAlignment.Left
+					button.AutoButtonColor = false
+
+					local corner = Instance.new("UICorner")
+					corner.CornerRadius = UDim.new(0, 3)
+					corner.Parent = button
+
+					button.MouseButton1Click:Connect(function()
+						Selected = data
+						syncEditor()
+					end)
+				end
+			end
+
+			ObjectList.CanvasSize = UDim2.new(0, 0, 0, ObjectLayout.AbsoluteContentSize.Y + 5)
+		end
+
+		syncEditor = function()
+			refreshViewport()
+			rebuildObjectList()
+		end
+
+		ObjectLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+			ObjectList.CanvasSize = UDim2.new(0, 0, 0, ObjectLayout.AbsoluteContentSize.Y + 5)
+		end)
+
+		ToolsSection:AddButton({
+			Name = "Refresh Preview",
+			Callback = function()
+				syncEditor()
+			end
+		})
+
+		ToolsSection:AddButton({
+			Name = "Clear Scene",
+			Risky = false,
+			Callback = function()
+				for _, data in ipairs(Objects) do
+					if data.Part then
+						data.Part:Destroy()
+					end
+				end
+				table.clear(Objects)
+				Selected = nil
+				syncEditor()
+			end
+		})
+
+		ToolsSection:AddButton({
+			Name = "Export Lua",
+			Callback = function()
+				local output = {
+					"-- Fatality 3D Editor export",
+					"local Model = Instance.new('Model')",
+					"Model.Name = 'GeneratedModel'",
+					"Model.Parent = workspace",
+					""
+				}
+
+				for _, data in ipairs(Objects) do
+					local part = data.Part
+					if part and part.Parent then
+						local cf = part.CFrame
+						local rx, ry, rz = cf:ToOrientation()
+						local size = part.Size
+						local color = part.Color
+
+						table.insert(output, ("local p = Instance.new(%q)"):format(part:IsA("WedgePart") and "WedgePart" or "Part"))
+						table.insert(output, ("p.Name = %q"):format(part.Name))
+						table.insert(output, ("p.Size = Vector3.new(%.4f, %.4f, %.4f)"):format(size.X, size.Y, size.Z))
+						table.insert(output, ("p.CFrame = CFrame.new(%.4f, %.4f, %.4f) * CFrame.Angles(%.5f, %.5f, %.5f)"):format(
+							cf.Position.X, cf.Position.Y, cf.Position.Z,
+							rx, ry, rz
+						))
+						table.insert(output, ("p.Color = Color3.fromRGB(%d, %d, %d)"):format(
+							math.floor(color.R * 255),
+							math.floor(color.G * 255),
+							math.floor(color.B * 255)
+						))
+						if part:IsA("Part") and part.Shape ~= Enum.PartType.Block then
+							table.insert(output, ("p.Shape = Enum.PartType.%s"):format(part.Shape.Name))
+						end
+						table.insert(output, ("p.Material = Enum.Material.%s"):format(part.Material.Name))
+						table.insert(output, "p.Anchored = true")
+						table.insert(output, "p.Parent = Model")
+						table.insert(output, "")
+					end
+				end
+
+				local result = table.concat(output, "\n")
+				if setclipboard then
+					pcall(setclipboard, result)
+				end
+
+				if Fatal.Notifier then
+					Fatal.Notifier:Notify({
+						Title = "3D EDITOR",
+						Content = "Lua model code copied to clipboard.",
+						Duration = 3,
+						Icon = Fatality:GetIcon("copy")
+					})
+				end
+			end
+		})
+
+		Fatal.__3DEditor = {
+			Menu = EditorMenu,
+			Objects = Objects,
+			Folder = EditorFolder,
+			GetSelected = function()
+				return Selected
+			end,
+			Refresh = function()
+				refreshViewport()
+				rebuildObjectList()
+			end
+		}
+
+		rebuildObjectList()
+		refreshViewport()
+
+		return Fatal.__3DEditor
+	end
+
+	-- 3D Editor is opt-in. It will NOT be created automatically.
+	-- Call Window:Add3DModelEditor() manually if you need it.
+
 	ToggleUI(true);
 	
 	Fatality:CreateWatermark(Fatalitywin);
